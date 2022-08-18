@@ -1,8 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
+const ObjectId = require('mongodb').ObjectId;
 let jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion } = require('mongodb');
+var nodemailer = require('nodemailer');
+var sgTransport = require('nodemailer-sendgrid-transport');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -29,16 +32,68 @@ function verifyJWT(req, res, next) {
       next();
     })};
 
+    const emailSenderOptions = {
+        auth: {
+          api_key: process.env.EMAIL_SENDER_KEY
+        }
+      }
+      
+      const emailClient = nodemailer.createTransport(sgTransport(emailSenderOptions));
+      
+      function sendAppointmentEmail(booking){
+        const {patient, patientName, treatment, date, slot} = booking;
+      
+        let email = {
+          from: process.env.EMAIL_SENDER,
+          to: patient,
+          subject: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+          text: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+          html: `
+            <div>
+              <p> Hello ${patientName}, </p>
+              <h3>Your Appointment for ${treatment} is confirmed</h3>
+              <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+              
+              <h3>Our Address</h3>
+              <p>Uttora,Dhaka</p>
+              <p>Bangladesh</p>
+            </div>
+          `
+        };
+      
+        emailClient.sendMail(email, function(err, info){
+          if (err ){
+            console.log(err);
+          }
+          else {
+            console.log('Message sent: ', info);
+          }
+      });
+      
+      }
+
 async function run(){
     try{
         await client.connect();
         const serviceCollection = client.db('dental_portal').collection('services');
         const bookingCollection = client.db('dental_portal').collection('booking');
         const userCollection = client.db('dental_portal').collection('users');
+        const doctorCollection = client.db('dental_portal').collection('doctors');
+
+        const verifyAdmin = async (req, res, next) => {
+            const requester = req.decoded.email;
+            const requesterAccount = await userCollection.findOne({ email: requester });
+            if (requesterAccount.role === 'admin') {
+              next();
+            }
+            else {
+              res.status(403).send({ message: 'forbidden' });
+            }
+          }
 
         app.get('/service', async(req, res) =>{
             const query = {};
-            const cursor = serviceCollection.find(query);
+            const cursor = serviceCollection.find(query).project({name:1});
             const services = await cursor.toArray();
             res.send(services);
         })
@@ -63,25 +118,34 @@ async function run(){
             console.log(isAdmin);
             res.send({admin: isAdmin})
           })
+
+        app.get('/doctor/:email', async(req, res) =>{
+            const email = req.params.email;
+            const user = await userCollection.findOne({email: email});
+            const isDoctor = user.role === 'doctor';
+            console.log(isAdmin);
+            res.send({doctor: isDoctor})
+          })
       
 
-        app.put('/user/admin/:email', verifyJWT, async (req, res) => {
+        app.put('/doctor/:email', verifyJWT, verifyAdmin, async (req, res) => {
             const email = req.params.email;
-            const requester = req.decoded.email;
-            const requesterAccount = await userCollection.findOne({ email: requester });
-            if (requesterAccount.role === 'admin') {
-              const filter = { email: email };
-              const updateDoc = {
-                $set: { role: 'admin' },
-              };
-              const result = await userCollection.updateOne(filter, updateDoc);
-              console.log(result);
-              res.send(result);
-            }
-            else{
-              res.status(403).send({message: 'forbidden'});
-            }
-      
+            const filter = { email: email };
+            const updateDoc = {
+              $set: { role: 'doctor' },
+            };
+            const result = await doctorCollection.updateOne(filter, updateDoc);
+            res.send(result);
+          })
+
+        app.put('/user/admin/:email', verifyJWT, verifyAdmin, async (req, res) => {
+            const email = req.params.email;
+            const filter = { email: email };
+            const updateDoc = {
+              $set: { role: 'admin' },
+            };
+            const result = await userCollection.updateOne(filter, updateDoc);
+            res.send(result);
           })
 
         app.get('/user' ,verifyJWT ,async(req,res)=>{
@@ -139,8 +203,42 @@ async function run(){
               return res.send({ success: false, booking: exists })
             }
             const result = await bookingCollection.insertOne(booking);
+            console.log(booking);
+            sendAppointmentEmail(booking);
             return res.send({ success: true, result });
         })
+
+
+
+        app.delete('/booking/:id',async(req,res)=>{
+      
+            const id = req.params.id;
+            const query = {_id:ObjectId(id)};
+            console.log((query));
+            const result = await bookingCollection.deleteOne(query);
+            console.log(result)
+            res.send(result);
+        })
+
+        app.get('/doctor', verifyJWT, verifyAdmin, async(req, res) =>{
+            const doctors = await doctorCollection.find().toArray();
+            res.send(doctors);
+        })
+        
+        
+        app.delete('/doctor/:email', verifyJWT, verifyAdmin, async (req, res) => {
+            const email = req.params.email;
+            const filter = {email: email};
+            const result = await doctorCollection.deleteOne(filter);
+            res.send(result);
+          })
+
+        app.post('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
+            const doctor = req.body;
+            console.log(doctor); 
+            const result = await doctorCollection.insertOne(doctor);
+            res.send(result);
+          });
 
         
 

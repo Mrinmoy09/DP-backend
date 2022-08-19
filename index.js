@@ -41,7 +41,7 @@ function verifyJWT(req, res, next) {
       const emailClient = nodemailer.createTransport(sgTransport(emailSenderOptions));
       
       function sendAppointmentEmail(booking){
-        const {patient, patientName, treatment, date, slot} = booking;
+        const {patient, patientName, treatment, date, slot ,status} = booking;
       
         let email = {
           from: process.env.EMAIL_SENDER,
@@ -53,14 +53,27 @@ function verifyJWT(req, res, next) {
               <p> Hello ${patientName}, </p>
               <h3>Your Appointment for ${treatment} is confirmed</h3>
               <p>Looking forward to seeing you on ${date} at ${slot}.</p>
-              
+              <p>Status is ${status},Please check our website for more deatils.</p>
               <h3>Our Address</h3>
               <p>Uttora,Dhaka</p>
               <p>Bangladesh</p>
             </div>
           `
         };
-      
+
+        // console.log({status: status});
+
+        // if(status === 'Approved'){
+        //   emailClient.sendMail(email, function(err, info){
+        //     if (err ){
+        //       console.log(err);
+        //     }
+        //     else {
+        //       console.log('Message sent: ', info);
+        //     }
+        // });
+        // }
+
         emailClient.sendMail(email, function(err, info){
           if (err ){
             console.log(err);
@@ -115,30 +128,13 @@ async function run(){
             const email = req.params.email;
             const user = await userCollection.findOne({email: email});
             const isAdmin = user.role === 'admin';
-            console.log(isAdmin);
             res.send({admin: isAdmin})
           })
 
-        app.get('/doctor/:email', async(req, res) =>{
-            const email = req.params.email;
-            const user = await userCollection.findOne({email: email});
-            const isDoctor = user.role === 'doctor';
-            console.log(isAdmin);
-            res.send({doctor: isDoctor})
-          })
-      
+       
 
-        app.put('/doctor/:email', verifyJWT, verifyAdmin, async (req, res) => {
-            const email = req.params.email;
-            const filter = { email: email };
-            const updateDoc = {
-              $set: { role: 'doctor' },
-            };
-            const result = await doctorCollection.updateOne(filter, updateDoc);
-            res.send(result);
-          })
-
-        app.put('/user/admin/:email', verifyJWT, verifyAdmin, async (req, res) => {
+        
+          app.put('/user/admin/:email', verifyJWT, verifyAdmin, async (req, res) => {
             const email = req.params.email;
             const filter = { email: email };
             const updateDoc = {
@@ -179,7 +175,28 @@ async function run(){
       
             res.send(services);
           })
+          
+          // booking api
 
+        
+          app.get('/appointments',verifyJWT, async(req,res)=>{
+            const booking = await bookingCollection.find().toArray();
+            res.send(booking);
+          })
+
+          app.put('/appointments/:id' ,verifyJWT , async(req,res)=>{
+            const id = req.params.id;
+            const updatedStatus = "Approved";
+            const filter = { _id:ObjectId(id) };
+            console.log(id);
+            bookingCollection
+              .updateOne(filter, {
+                $set: { status: updatedStatus },
+              })
+              .then((result) => {
+                res.send(result);
+              });
+           })
         
           app.get('/booking', verifyJWT, async(req, res) =>{
             const patient = req.query.patient;
@@ -211,7 +228,6 @@ async function run(){
 
 
         app.delete('/booking/:id',async(req,res)=>{
-      
             const id = req.params.id;
             const query = {_id:ObjectId(id)};
             console.log((query));
@@ -219,6 +235,8 @@ async function run(){
             console.log(result)
             res.send(result);
         })
+
+        // doctor api 
 
         app.get('/doctor', verifyJWT, verifyAdmin, async(req, res) =>{
             const doctors = await doctorCollection.find().toArray();
@@ -235,10 +253,28 @@ async function run(){
 
         app.post('/doctor', verifyJWT, verifyAdmin, async (req, res) => {
             const doctor = req.body;
-            console.log(doctor); 
             const result = await doctorCollection.insertOne(doctor);
             res.send(result);
           });
+
+        
+        app.put('/user/doctor/:email',verifyJWT,verifyAdmin, async(req,res)=>{
+          const email = req.params.email;
+          const filter = { email: email };
+          const updateDoc = {
+            $set: { role: 'doctor' },
+          };
+          const result = await userCollection.updateOne(filter, updateDoc);
+          res.send(result);
+      })
+
+      app.get('/doctor/:email', async(req, res) =>{
+        const email = req.params.email;
+        const user = await userCollection.findOne({email: email});
+        const isDoctor = user.role === 'doctor';
+        console.log({isDoctor:isDoctor});
+        res.send({doctor: isDoctor})
+      })
 
         
 
